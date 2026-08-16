@@ -1,0 +1,62 @@
+# Lightweight profile for measuring the synchronous expense create/submit
+# HTTP path. Kafka consumer/producer and Redis are disabled so an 8GB
+# laptop can hold 500 concurrent VUs without the OS OOM-killing the JVM.
+# The outbox row is still written; when Kafka beans are absent events stay
+# unpublished (see DomainEventProducer). OutboxRelay is off in this profile.
+# AFTER_COMMIT notify/activity/ws listener is also off so side-effect DB
+# work does not contend with the timed write path under load.
+spring:
+  autoconfigure:
+    exclude: >
+      org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,
+      org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration,
+      org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+  datasource:
+    url: jdbc:postgresql://localhost:5432/expense_management
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    hikari:
+      # Sized for ~500 concurrent VUs on the JDBC hot path. Tail latency under
+      # load is usually pool wait, not SQL.
+      # Leave headroom under Postgres max_connections (often 100 on local Docker).
+      maximum-pool-size: ${DB_POOL_SIZE:100}
+      minimum-idle: 30
+      connection-timeout: 3000
+      # Fail fast rather than queue for 30s under overload.
+      validation-timeout: 1000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  kafka:
+    listener:
+      auto-startup: false
+
+server:
+  tomcat:
+    threads:
+      # Platform threads (Java 17). High enough that 500 VU in-flight create+submit
+      # pairs are not queued behind Tomcat's default 200 max.
+      max: ${TOMCAT_MAX_THREADS:600}
+      min-spare: 50
+    accept-count: 200
+    max-connections: 10000
+
+app:
+  jwt:
+    # Fail-fast if JWT_SECRET is unset. No mintable default in loadtest.
+    secret: ${JWT_SECRET}
+  security:
+    # Trust verified JWT claims; skip Hibernate user lookup on every request.
+    jwt-user-lookup: false
+  anomaly-scoring:
+    grpc-target: localhost:9
+    deadline-ms: 50
+
+logging:
+  level:
+    root: WARN
+    com.expensemanagement: WARN
+    org.springframework: WARN

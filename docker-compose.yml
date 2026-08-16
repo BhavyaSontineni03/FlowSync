@@ -1,0 +1,118 @@
+# Local stack: Postgres, Redis, Kafka, scoring service, backend, frontend.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: expense-postgres
+    environment:
+      POSTGRES_DB: expense_management
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: expense-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Single-node Kafka in KRaft mode -- no separate Zookeeper container
+  # needed. Fine for local dev and for demonstrating the per-tenant topic
+  # isolation; a real deployment would run a proper multi-broker cluster.
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: expense-kafka
+    ports:
+      # Host clients (backend on host) hit localhost:9092 -> container PLAINTEXT_HOST
+      - "9092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Dual listeners: internal Docker DNS for compose services, localhost
+      # for a backend/ml process running on the host (hybrid host/docker).
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: expense-ml-service
+    ports:
+      - "8000:8000"   # REST (health checks, local testing)
+      - "50051:50051" # gRPC (what the backend actually calls)
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    build:
+      # The Java build generates gRPC stubs from the shared contract in
+      # proto/, so its build context must include both backend/ and proto/.
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: expense-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/expense_management
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ANOMALY_SCORING_GRPC_TARGET: ml-service:50051
+      # Generate a real secret for anything beyond local dev:
+      #   openssl rand -base64 48
+      JWT_SECRET: ${JWT_SECRET:-dev-only-local-secret-do-not-use-in-production-replace-via-env-var}
+      TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    volumes:
+      - ./backend/uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: expense-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

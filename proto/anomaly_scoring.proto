@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+// Contract between the Spring Boot backend and the Python anomaly-scoring
+// service. Kept in one place so both sides generate stubs from the same
+// source of truth instead of hand-maintaining parallel definitions.
+package anomaly.v1;
+
+option java_multiple_files = true;
+option java_package = "com.expensemanagement.grpc.anomaly";
+option java_outer_classname = "AnomalyScoringProto";
+
+service AnomalyScoringService {
+  // Scores a single expense submission. Called synchronously from the
+  // expense-submission Saga step; wrapped in a circuit breaker on the
+  // Java side (see backend GrpcAnomalyScoringClient).
+  rpc ScoreExpense(ScoreExpenseRequest) returns (ScoreExpenseResponse);
+}
+
+message RecentSubmission {
+  double amount = 1;
+  string category = 2;
+  string vendor = 3;
+  string expense_date = 4;   // ISO-8601 date, e.g. 2026-07-20
+  string submitted_at = 5;   // ISO-8601 datetime
+}
+
+message ScoreExpenseRequest {
+  string org_id = 1;
+  string user_id = 2;
+  string category = 3;
+  double amount = 4;
+  string vendor = 5;
+  string expense_date = 6;
+  string submitted_at = 7;
+  repeated RecentSubmission recent_submissions = 8;
+  repeated double user_category_history = 9;
+}
+
+message ScoreExpenseResponse {
+  double anomaly_score = 1;
+  bool is_anomalous = 2;
+  double percentile_in_reference = 3;
+  map<string, double> features = 4;
+  string model_version = 5;
+}

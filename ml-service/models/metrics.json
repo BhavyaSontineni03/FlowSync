@@ -1,0 +1,61 @@
+{
+  "model_version": "semi-supervised-if-hgb-v1",
+  "pipeline": "isolation_forest_then_reviewer_calibrator",
+  "review_flag_rate": 0.2,
+  "audit_rate": 0.05,
+  "labeled_fraction_of_train_val": 0.24,
+  "n_reviewer_labels": 1869,
+  "n_positive_reviewer_labels": 814,
+  "operating_flag_rate": 0.12,
+  "probability_threshold_at_operating_point": 0.787787,
+  "test_set_size": 2597,
+  "test_set_anomaly_rate_pct": 12.63,
+  "flagged_rate_pct": 12.01,
+  "precision": 0.9776,
+  "recall": 0.9299,
+  "f1": 0.9531,
+  "scoring_latency_ms_per_record": 0.0049,
+  "pure_if_precision_at_operating_point": 0.6891,
+  "pure_if_recall_at_operating_point": 0.6555,
+  "recall_by_archetype": {
+    "amount_outlier": 0.8356,
+    "backdated": 1.0,
+    "near_duplicate": 0.987,
+    "structuring": 0.8901
+  },
+  "baseline_keyword_filter_near_duplicate_recall": 0.0,
+  "baseline_keyword_filter_near_duplicate_missed_pct": 100.0,
+  "model_near_duplicate_recall": 0.987,
+  "threshold_sweep": [
+    {
+      "flag_rate_pct": 15,
+      "precision": 0.8205,
+      "recall": 0.9756
+    },
+    {
+      "flag_rate_pct": 12,
+      "precision": 0.9776,
+      "recall": 0.9299
+    },
+    {
+      "flag_rate_pct": 10,
+      "precision": 0.9885,
+      "recall": 0.7835
+    },
+    {
+      "flag_rate_pct": 8,
+      "precision": 0.9856,
+      "recall": 0.625
+    },
+    {
+      "flag_rate_pct": 6,
+      "precision": 0.9936,
+      "recall": 0.4726
+    },
+    {
+      "flag_rate_pct": 4,
+      "precision": 1.0,
+      "recall": 0.3171
+    }
+  ]
+}

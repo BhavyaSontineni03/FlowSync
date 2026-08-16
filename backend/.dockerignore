@@ -1,0 +1,8 @@
+.git
+.gitignore
+.mvn
+target
+uploads
+*.log
+.DS_Store
+

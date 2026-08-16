@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: expense-management-platform-test
+  datasource:
+    # Every Spring test context gets its own isolated in-memory database.
+    # Multiple @SpringBootTest configurations (different mocked beans, active
+    # profiles, etc.) each spin up a separate ApplicationContext; if they all
+    # pointed at the same named H2 instance, one context's schema drop could
+    # wipe out tables while another context was mid-use, and Hibernate's
+    # hbm2ddl schema export failures are non-fatal, so a dropped table would
+    # only surface later as a "table not found" error on first insert.
+    url: jdbc:h2:mem:testdb-${random.uuid};DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: false
+  # The Flyway migrations are hand-written Postgres DDL (check constraints,
+  # bigserial, etc). Tests run against disposable H2 instances and let
+  # Hibernate generate the schema directly instead, which is simpler and
+  # already gives every test its own clean-slate database.
+  flyway:
+    enabled: false
+  data:
+    redis:
+      enabled: false
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+  kafka:
+    bootstrap-servers: localhost:9092
+    listener:
+      # Registers the @KafkaListener beans (so the context still wires
+      # correctly) without actually starting a consumer thread that would
+      # try, and fail, to reach a broker that doesn't exist in the test
+      # environment. The saga/event-publishing unit tests exercise
+      # DomainEventConsumer and EventPublisher directly with mocks instead.
+      auto-startup: false
+
+app:
+  jwt:
+    secret: test-secret-key-for-testing-purposes-only-change-in-production-256-bits-long
+    expiration: 86400000
+  anomaly-scoring:
+    grpc-target: localhost:59999
+    deadline-ms: 200
+  events:
+    topic-prefix: expense-events-test
+    topic-partitions: 1
+    topic-replication-factor: 1
+
+logging:
+  level:
+    root: WARN
+    com.expensemanagement: INFO
+    org.springframework: WARN
+    org.hibernate: WARN

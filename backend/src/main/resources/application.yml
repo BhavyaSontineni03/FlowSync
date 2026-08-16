@@ -1,0 +1,177 @@
+spring:
+  application:
+    name: expense-management-platform
+  # Disable Redis auto-configuration if host is not set
+  autoconfigure:
+    exclude: ${REDIS_AUTO_CONFIGURE:}
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/expense_management
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:50}
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  
+  jpa:
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks the mappings match what
+      # migrations have already created. Nothing here can silently ALTER a
+      # production table.
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Existing local/prod volumes created under Hibernate ddl-auto=update have
+    # tables but no flyway_schema_history. baseline-on-migrate tags them at
+    # baseline-version (V1) without re-running V1__baseline_schema.sql, so
+    # validate + Flyway can take over without wiping data. Empty databases
+    # still apply V1 normally on first migrate.
+    baseline-on-migrate: true
+    baseline-version: 1
+  
+  data:
+    redis:
+      # Redis is enabled for caching analytics and improving performance
+      # Analytics are cached for 5 minutes, reducing database load
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # KafkaProducer.send() blocks the calling thread until topic metadata
+        # is available -- with the broker down/unreachable that default is 60s
+        # (max.block.ms), which stalls the HTTP request thread that just
+        # committed the DB transaction in EventPublisher#publishNow. Bound it
+        # so a Kafka outage fails fast and the outbox relay retries later
+        # instead of holding a Tomcat worker thread for a minute per request.
+        max.block.ms: 3000
+        request.timeout.ms: 5000
+    consumer:
+      group-id: expense-saga-orchestrator
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate
+  
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+    from: ${MAIL_FROM:noreply@expensemanagement.com}
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+  error:
+    include-message: always
+    include-binding-errors: always
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-local-secret-do-not-use-in-production-replace-via-env-var}
+    expiration: 86400000 # 24 hours in milliseconds
+  
+  cors:
+    allowed-origins: http://localhost:3000,http://127.0.0.1:3000
+  
+  tesseract:
+    data-path: ${TESSDATA_PREFIX:/opt/homebrew/share/tessdata}
+    language: eng
+
+  anomaly-scoring:
+    grpc-target: ${ANOMALY_SCORING_GRPC_TARGET:localhost:50051}
+    deadline-ms: ${ANOMALY_SCORING_DEADLINE_MS:800}
+
+  events:
+    # Per-tenant topic naming: one topic per organization keeps each org's
+    # event stream, retention, and consumer lag fully isolated from every
+    # other org -- a noisy or backed-up tenant cannot delay another
+    # tenant's events, and topic-level ACLs can restrict access per org.
+    topic-prefix: ${EVENT_TOPIC_PREFIX:expense-events}
+    topic-partitions: ${EVENT_TOPIC_PARTITIONS:3}
+    topic-replication-factor: ${EVENT_TOPIC_REPLICATION_FACTOR:1}
+
+file:
+  upload-dir: ./uploads
+
+logging:
+  level:
+    root: INFO
+    com.expensemanagement: ${APP_LOG_LEVEL:INFO}
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      anomalyScoring:
+        register-health-indicator: true
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 800ms
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 5
+        automatic-transition-from-open-to-half-open-enabled: true
+  retry:
+    instances:
+      anomalyScoring:
+        max-attempts: 2
+        wait-duration: 150ms
+        retry-exceptions:
+          - io.grpc.StatusRuntimeException
+        ignore-exceptions:
+          # Don't retry calls that failed because the circuit is already
+          # open -- retrying into an open circuit just wastes the retry
+          # budget on a call that is guaranteed to be rejected locally.
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
