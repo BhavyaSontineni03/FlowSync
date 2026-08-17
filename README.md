@@ -6,7 +6,7 @@ Multi-tenant expense, leave, timesheet, and payroll platform.
 
 Each organization gets its own Kafka topic. Expense submissions are scored for anomalies by a separate Python service. Budget reservation and payment run as a saga, with a compensating rollback if a later step fails.
 
-![FlowSync home](docs/assets/home.png)
+![FlowSync dashboard after login](docs/assets/home.png)
 
 [Architecture](ARCHITECTURE.md)
 
